@@ -10,7 +10,7 @@ import numpy as np
 from .io     import load_volume
 from .labels import remap_labels
 
-MODALITIES     = ["flair", "t1", "t1ce", "t2"]
+MODALITIES     = ["t2f", "t1n", "t1c", "t2w"]   # BraTS 2024: flair, t1, t1ce, t2
 NUM_MODALITIES = len(MODALITIES)   # 4 input channels
 
 
@@ -37,7 +37,7 @@ def load_patient(
 
     modality_vols = []
     for mod in MODALITIES:
-        files = glob.glob(str(patient_dir / f"{patient_id}_{mod}.nii*"))
+        files = glob.glob(str(patient_dir / f"{patient_id}-{mod}.nii*"))
         if not files:
             raise FileNotFoundError(
                 f"Missing modality '{mod}' for {patient_id}"
@@ -48,7 +48,7 @@ def load_patient(
 
     seg = None
     if load_seg:
-        files = glob.glob(str(patient_dir / f"{patient_id}_seg.nii*"))
+        files = glob.glob(str(patient_dir / f"{patient_id}-seg.nii*"))
         if not files:
             raise FileNotFoundError(
                 f"Missing segmentation mask for {patient_id}"

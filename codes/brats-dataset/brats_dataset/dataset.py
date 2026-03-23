@@ -36,12 +36,17 @@ class BraTS20Dataset(Dataset):
         self.split   = split
         self.has_seg = split in self.HAS_SEG
 
-        split_dir = Path(data_root) / split
+        SPLIT_DIRS = {
+            "train":      "BraTS2024-BraTS-GLI-TrainingData/training_data1_v2",
+            "validation": "BraTS2024-BraTS-GLI-ValidationData/validation_data",
+            "additional": "BraTS2024-BraTS-GLI-AdditionalTrainingData/training_data_additional",
+        }
+        split_dir = Path(data_root) / SPLIT_DIRS[split]
         self.patient_dirs = sorted([d for d in split_dir.iterdir() if d.is_dir()])
 
         if csv_path and Path(csv_path).exists():
-            df        = pd.read_csv(csv_path)
-            valid_ids = set(df["BraTS20ID"].astype(str))
+            df        = pd.read_excel(csv_path)
+            valid_ids = set(df["BraTS Subject ID"].astype(str))
             self.patient_dirs = [
                 d for d in self.patient_dirs if d.name in valid_ids
             ]
