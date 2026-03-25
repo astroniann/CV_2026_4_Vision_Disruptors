@@ -4,6 +4,7 @@ Helpers for distributed training.
 
 import io
 import os
+import platform
 import socket
 
 import blobfile as bf
@@ -27,28 +28,37 @@ def setup_dist(devices=(0,)):
         device_string = ','.join(map(str, devices))
     except TypeError:
         device_string = str(devices)
-    os.environ["CUDA_VISIBLE_DEVICES"] = device_string #f"{MPI.COMM_WORLD.Get_rank() % GPUS_PER_NODE}"
+    os.environ["CUDA_VISIBLE_DEVICES"] = device_string
 
-    #comm = MPI.COMM_WORLD
-  #  print('commworld, 'f"{MPI.COMM_WORLD.Get_rank() % GPUS_PER_NODE}", comm)
+    # On Windows with single-GPU, skip distributed init entirely
+    # (TCPStore consistently fails on Windows)
+    if platform.system() == "Windows":
+        os.environ["RANK"] = "0"
+        os.environ["WORLD_SIZE"] = "1"
+        os.environ["MASTER_ADDR"] = "127.0.0.1"
+        os.environ["MASTER_PORT"] = "0"
+        # Use file-based store instead of TCPStore to avoid network issues
+        import tempfile
+        store_path = os.path.join(tempfile.gettempdir(), "torch_dist_store")
+        store = dist.FileStore(store_path, 1)
+        dist.init_process_group(backend="gloo", store=store, rank=0, world_size=1)
+        return
+
     backend = "gloo" if not th.cuda.is_available() else "nccl"
-   # print('commrank', comm.rank)
-   # print('commsize', comm.size)
 
     if backend == "gloo":
         hostname = "localhost"
     else:
         hostname = socket.gethostbyname(socket.getfqdn())
-    os.environ["MASTER_ADDR"] = '127.0.1.1'#comm.bcast(hostname, root=0)
-    os.environ["RANK"] = '0'#str(comm.rank)
-    os.environ["WORLD_SIZE"] = '1'#str(comm.size)
+    os.environ["MASTER_ADDR"] = hostname
+    os.environ["RANK"] = '0'
+    os.environ["WORLD_SIZE"] = '1'
 
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("", 0))
     s.listen(1)
     port = s.getsockname()[1]
     s.close()
-    # print('port2', port)
     os.environ["MASTER_PORT"] = str(port)
     dist.init_process_group(backend=backend, init_method="env://")
 

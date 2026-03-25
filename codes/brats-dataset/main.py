@@ -164,6 +164,7 @@ def create_argparser():
         diffusion_steps=1000,
     )
     defaults.update(model_and_diffusion_defaults())
+    defaults["split"] = "train"  # train | validation | additional
     parser = argparse.ArgumentParser()
     add_dict_to_argparser(parser, defaults)
     return parser

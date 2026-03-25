@@ -25,11 +25,12 @@ IN_CHANNELS=32        # 8 + 8×(number of conditioning modalities)
 NOISE_SCHED='linear'
 
 # ---- data paths ----
+DATA_DIR="D:\user\BraTS2024-GLI"
 if [[ $MODE == 'train' ]]; then
-  DATA_DIR=./datasets/BRATS2023/training
+  SPLIT='train'
 elif [[ $MODE == 'sample' || $MODE == 'auto' ]]; then
   BATCH_SIZE=1
-  DATA_DIR=./datasets/BRATS2023/validation
+  SPLIT='validation'
 fi
 
 COMMON="
@@ -57,6 +58,7 @@ COMMON="
 --use_freq=False
 --predict_xstart=True
 --contr=${CONTR}
+--split=${SPLIT}
 "
 
 TRAIN="
