@@ -143,7 +143,7 @@ def main():
             model_kwargs={},
         )
 
-        B, _, D, H, W = sample.size()
+        B, _, H, W, D = sample.size()
         sample = idwt(
             sample[:, 0, :, :, :].view(B, 1, D, H, W) * 3.,
             sample[:, 1, :, :, :].view(B, 1, D, H, W),

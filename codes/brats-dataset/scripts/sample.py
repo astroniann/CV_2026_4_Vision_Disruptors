@@ -121,7 +121,7 @@ def main():
             model_kwargs={},
         )
 
-        B, _, D, H, W = sample.size()
+        B, _, H, W, D = sample.size()
         sample = idwt(
             sample[:, 0, :, :, :].view(B, 1, D, H, W) * 3.,
             sample[:, 1, :, :, :].view(B, 1, D, H, W),
@@ -135,7 +135,7 @@ def main():
 
         sample[sample <= 0] = 0
         sample[sample >= 1] = 1
-        sample[cond_1 == 0] = 0  # zero out non-brain voxels
+        sample[cond_1.squeeze(1) == 0] = 0  # zero out non-brain voxels
 
         if len(sample.shape) == 5:
             sample = sample.squeeze(dim=1)
