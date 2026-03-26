@@ -85,6 +85,7 @@ def main():
         split="train",
         batch_size=args.batch_size,
         num_workers=args.num_workers,
+        dropout_modality=args.dropout_modality,
     )
 
     # ---------------------------------------------------------------
@@ -125,6 +126,7 @@ def create_argparser():
         seed=42,
         use_tensorboard=True,
         tensorboard_path="",
+        dropout_modality=False,   # set True to enable on-the-fly modality dropout
         # ---- mirrors cwdm run.sh defaults ----
         data_dir="",
         schedule_sampler="uniform",
