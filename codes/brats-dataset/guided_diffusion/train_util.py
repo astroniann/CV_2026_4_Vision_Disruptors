@@ -3,6 +3,7 @@ import functools
 import os
 
 import blobfile as bf
+import torch
 import torch as th
 import torch.distributed as dist
 import torch.utils.tensorboard

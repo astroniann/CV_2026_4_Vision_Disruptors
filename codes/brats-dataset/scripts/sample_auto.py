@@ -1,5 +1,22 @@
 """
-A script for sampling from a diffusion model for paired image-to-image translation.
+A script for automatic multi-contrast MRI synthesis — picks the right model
+based on whichever modality is missing in each patient folder.
+
+Uses BraTS20Dataset with dropout_modality=True so batch['missing'] is set
+automatically (or point --data_dir at a pseudo-validation set made by
+scripts/dropout_modality.py).
+
+Model paths must be filled in below (or passed via --model_t1n etc.)
+Weights are available on HuggingFace (see cwdm README).
+
+Usage (Windows):
+    python scripts/sample_auto.py ^
+        --data_dir C:/data/BraTS2024-GLI ^
+        --model_t1n C:/weights/brats_t1n.pt ^
+        --model_t1c C:/weights/brats_t1c.pt ^
+        --model_t2w C:/weights/brats_t2w.pt ^
+        --model_t2f C:/weights/brats_t2f.pt ^
+        --output_dir ./results/auto/
 """
 
 import argparse
@@ -14,12 +31,12 @@ import torch.nn.functional as F
 
 sys.path.append(".")
 
-from guided_diffusion import (dist_util,
-                              logger)
-from guided_diffusion.bratsloader import BRATSVolumes
+from guided_diffusion import dist_util, logger
 from guided_diffusion.script_util import (model_and_diffusion_defaults, create_model_and_diffusion,
                                           add_dict_to_argparser, args_to_dict)
 from DWT_IDWT.DWT_IDWT_layer import IDWT_3D, DWT_3D
+from brats_dataset import get_dataloader
+
 
 def main():
     args = create_argparser().parse_args()
@@ -33,17 +50,28 @@ def main():
     )
     diffusion.mode = 'i2i'
 
-    if args.dataset == 'brats':
-        ds = BRATSVolumes(args.data_dir, mode='auto')
+    # Map each missing modality to its model weight path
+    model_paths = {
+        't1n': args.model_t1n,
+        't1c': args.model_t1c,
+        't2w': args.model_t2w,
+        't2f': args.model_t2f,
+    }
 
-    datal = th.utils.data.DataLoader(ds,
-                                     batch_size=args.batch_size,
-                                     num_workers=12,
-                                     shuffle=False,)
+    # Use our BraTS20Dataset with dropout so batch['missing'] is populated.
+    # For a real pseudo-validation set (produced by dropout_modality.py),
+    # set dropout_modality=False and point data_dir at the pseudo set folder.
+    datal = get_dataloader(
+        data_root=args.data_dir,
+        split="validation",
+        batch_size=args.batch_size,
+        num_workers=0,          # keep 0 on Windows
+        dropout_modality=args.dropout_modality,
+    )
 
     model.eval()
     idwt = IDWT_3D("haar")
-    dwt = DWT_3D("haar")
+    dwt  = DWT_3D("haar")
 
     th.manual_seed(seed)
     np.random.seed(seed)
@@ -53,56 +81,48 @@ def main():
         missing = batch['missing'][0]
         print("Missing modality: {}".format(missing))
 
-        if missing == 't1n':
-            selected_model_path = '' # INSERT PATH TO 't1n' GENERATING MODEL (weights available on HuggingFace)
-        elif missing == 't1c':
-            selected_model_path = '' # INSERT PATH TO 't1c' GENERATING MODEL (weights available on HuggingFace)
-        elif missing == 't2w':
-            selected_model_path = '' # INSERT PATH TO 't2w' GENERATING MODEL (weights available on HuggingFace)
-        elif missing == 't2f':
-            selected_model_path = '' # INSERT PATH TO 't2f' GENERATING MODEL (weights available on HuggingFace)
+        if missing == 'none':
+            print("No modality missing in this sample — skipping (use dropout_modality=True or a pseudo-validation set).")
+            continue
+
+        selected_model_path = model_paths.get(missing, '')
+        if not selected_model_path:
+            print(f"No model path set for missing modality '{missing}'. "
+                  f"Pass --model_{missing} /path/to/weights.pt")
+            continue
 
         logger.log("Load model from: {}".format(selected_model_path))
         model.load_state_dict(dist_util.load_state_dict(selected_model_path, map_location="cpu"))
-        model.to(dist_util.dev([0, 1]) if len(args.devices) > 1 else dist_util.dev())  # allow for 2 devices
+        model.to(dist_util.dev([0, 1]) if len(args.devices) > 1 else dist_util.dev())
 
         batch['t1n'] = batch['t1n'].to(dist_util.dev())
         batch['t1c'] = batch['t1c'].to(dist_util.dev())
         batch['t2w'] = batch['t2w'].to(dist_util.dev())
         batch['t2f'] = batch['t2f'].to(dist_util.dev())
 
-        subj = batch['subj'][0].split('pseudo_validation_v2/')[1][:19]
+        # batch['subj'] is the full path — use just the patient folder name
+        subj = pathlib.Path(batch['subj'][0]).name
         print(subj)
 
-        miss_name = args.data_dir + '/' + subj + '/' + subj +'-' + missing
-        print(miss_name)
-
         if missing == 't1n':
-            cond_1 = batch['t1c']  # condition
-            cond_2 = batch['t2w']  # condition
-            cond_3 = batch['t2f']  # condition
-            header = nib.load(batch['filedict']['t1c'][0]).header
-
+            cond_1 = batch['t1c']
+            cond_2 = batch['t2w']
+            cond_3 = batch['t2f']
         elif missing == 't1c':
             cond_1 = batch['t1n']
             cond_2 = batch['t2w']
             cond_3 = batch['t2f']
-            header = nib.load(batch['filedict']['t1n'][0]).header
-
         elif missing == 't2w':
             cond_1 = batch['t1n']
             cond_2 = batch['t1c']
             cond_3 = batch['t2f']
-            header = nib.load(batch['filedict']['t1n'][0]).header
-
         elif missing == 't2f':
             cond_1 = batch['t1n']
             cond_2 = batch['t1c']
             cond_3 = batch['t2w']
-            header = nib.load(batch['filedict']['t1n'][0]).header
-
         else:
             print("This contrast can't be synthesized.")
+            continue
 
         # Conditioning vector
         LLL, LLH, LHL, LHH, HLL, HLH, HHL, HHH = dwt(cond_1)
@@ -112,81 +132,78 @@ def main():
         LLL, LLH, LHL, LHH, HLL, HLH, HHL, HHH = dwt(cond_3)
         cond = th.cat([cond, LLL / 3., LLH, LHL, LHH, HLL, HLH, HHL, HHH], dim=1)
 
-
-
-        # Noise
         noise = th.randn(args.batch_size, 8, 112, 112, 80).to(dist_util.dev())
 
-        model_kwargs = {}
-
-        sample_fn = diffusion.p_sample_loop
-
-        sample = sample_fn(model=model,
-                           shape=noise.shape,
-                           noise=noise,
-                           cond=cond,
-                           clip_denoised=args.clip_denoised,
-                           model_kwargs=model_kwargs)
+        sample = diffusion.p_sample_loop(
+            model=model,
+            shape=noise.shape,
+            noise=noise,
+            cond=cond,
+            clip_denoised=args.clip_denoised,
+            model_kwargs={},
+        )
 
         B, _, D, H, W = sample.size()
-        sample = idwt(sample[:, 0, :, :, :].view(B, 1, D, H, W) * 3.,
-                      sample[:, 1, :, :, :].view(B, 1, D, H, W),
-                      sample[:, 2, :, :, :].view(B, 1, D, H, W),
-                      sample[:, 3, :, :, :].view(B, 1, D, H, W),
-                      sample[:, 4, :, :, :].view(B, 1, D, H, W),
-                      sample[:, 5, :, :, :].view(B, 1, D, H, W),
-                      sample[:, 6, :, :, :].view(B, 1, D, H, W),
-                      sample[:, 7, :, :, :].view(B, 1, D, H, W))
+        sample = idwt(
+            sample[:, 0, :, :, :].view(B, 1, D, H, W) * 3.,
+            sample[:, 1, :, :, :].view(B, 1, D, H, W),
+            sample[:, 2, :, :, :].view(B, 1, D, H, W),
+            sample[:, 3, :, :, :].view(B, 1, D, H, W),
+            sample[:, 4, :, :, :].view(B, 1, D, H, W),
+            sample[:, 5, :, :, :].view(B, 1, D, H, W),
+            sample[:, 6, :, :, :].view(B, 1, D, H, W),
+            sample[:, 7, :, :, :].view(B, 1, D, H, W),
+        )
 
         sample[sample <= 0.04] = 0
 
         if len(sample.shape) == 5:
-            sample = sample.squeeze(dim=1)  # don't squeeze batch dimension for bs 1
+            sample = sample.squeeze(dim=1)
 
-        # Pad/Crop to original resolution
+        # Pad back to 240×240 and crop to 155 slices
         pad_sample = F.pad(sample, (0, 0, 8, 8, 8, 8), mode='constant', value=0)
         sample = pad_sample[:, :, :, :155]
 
-
-        if len(cond_1.shape) == 5:
-            cond_1 = cond_1.squeeze(dim=1)
-        if len(cond_2.shape) == 5:
-            cond_2 = cond_2.squeeze(dim=1)
-        if len(cond_3.shape) == 5:
-            cond_3 = cond_3.squeeze(dim=1)
-
+        # Save synthesised volume in-place alongside the existing modalities
+        out_dir = pathlib.Path(args.output_dir) / subj
+        out_dir.mkdir(parents=True, exist_ok=True)
 
         for i in range(sample.shape[0]):
-            output_name = miss_name +'.nii.gz'
-            img = nib.Nifti1Image(sample.detach().cpu().numpy()[i, :, :, :], None, header)
-            nib.save(img=img, filename=output_name)
-            print(f'Saved to {output_name}')
-
-
+            # Name matches BraTS2024 convention so downstream tools recognise it
+            out_name = str(out_dir / f"{subj}-{missing}.nii.gz")
+            nib.save(
+                nib.Nifti1Image(sample.detach().cpu().numpy()[i], np.eye(4)),
+                out_name,
+            )
+            print(f'Saved to {out_name}')
 
 
 def create_argparser():
     defaults = dict(
         seed=0,
         data_dir="",
-        data_mode='validation',
         clip_denoised=True,
         num_samples=1,
         batch_size=1,
         use_ddim=False,
         class_cond=False,
         sampling_steps=0,
-        model_path="",
+        # Per-modality model weight paths — fill in or pass on command line
+        model_t1n="",
+        model_t1c="",
+        model_t2w="",
+        model_t2f="",
         devices=[0],
         output_dir='./results',
         mode='default',
         renormalize=False,
-        image_size=256,
+        image_size=224,
         half_res_crop=False,
-        concat_coords=False, # if true, add 3 (for 3d) or 2 (for 2d) to in_channels
+        concat_coords=False,
         contr="",
+        dropout_modality=True,   # True = use on-the-fly dropout; False = use pre-made pseudo-val set
     )
-    defaults.update({k:v for k, v in model_and_diffusion_defaults().items() if k not in defaults})
+    defaults.update({k: v for k, v in model_and_diffusion_defaults().items() if k not in defaults})
     parser = argparse.ArgumentParser()
     add_dict_to_argparser(parser, defaults)
     return parser
@@ -194,6 +211,7 @@ def create_argparser():
 
 if __name__ == "__main__":
     main()
+
 
 
 

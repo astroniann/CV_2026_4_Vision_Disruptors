@@ -357,8 +357,11 @@ class GaussianDiffusion:
         else:
             raise NotImplementedError(self.model_mean_type)
 
-        assert (model_mean.shape == model_log_variance.shape == pred_xstart.shape == x.shape)
-
+        # In i2i mode x is concatenated [noisy_target(8) + cond(24)] = 32 channels,
+        # but model outputs (mean, variance, pred_xstart) are all 8-channel.
+        # Assert only on the target portion to avoid false failures.
+        target_shape = pred_xstart.shape
+        assert model_mean.shape == model_log_variance.shape == target_shape
 
         return {
             "mean": model_mean,
@@ -1195,7 +1198,7 @@ class GaussianDiffusion:
 
             # Calculate VLB term at the current timestep
             with th.no_grad():
-                out = self._vb_terms_bptimestepsd(
+                out = self._vb_terms_bpd(
                     model,
                     x_start=x_start,
                     x_t=x_t,

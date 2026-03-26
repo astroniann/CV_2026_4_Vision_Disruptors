@@ -1,34 +1,52 @@
 #!/bin/bash
-# Run script — mirrors cwdm's run.sh exactly.
-# Points at our main.py instead of scripts/train.py,
-# but all flags and defaults are identical.
+# Run script for training, sampling, auto-sampling, and evaluation.
+#
+# Windows users: run this inside Git Bash or WSL.
+# All paths use forward slashes — Git Bash handles the conversion automatically.
+# Do NOT use backslashes (D:\...) — they break variable expansion in bash.
+#
+# Usage examples (Git Bash / WSL):
+#   bash run.sh          # trains t1n synthesis
+#   MODE=sample bash run.sh
+#   MODE=auto   bash run.sh
+#   MODE=eval   bash run.sh
 
 # ---- general settings ----
 GPU=0
 SEED=42
 CHANNELS=64
-MODE='train'          # train | sample | auto
+MODE='train'        # train | sample | auto | eval
 DATASET='brats'
-CONTR='t1n'           # contrast to synthesise: t1n | t1c | t2w | t2f
+CONTR='t1n'         # contrast to synthesise: t1n | t1c | t2w | t2f
 
 # ---- sampling/inference settings ----
 ITERATIONS=1200
 SAMPLING_STEPS=0
-RUN_DIR=""
+RUN_DIR=""          # path to run folder containing checkpoints/ subfolder
 
 # ---- model settings ----
 CHANNEL_MULT=1,2,2,4,4
 ADDITIVE_SKIP=False
 BATCH_SIZE=1
 IMAGE_SIZE=224
-IN_CHANNELS=32        # 8 + 8×(number of conditioning modalities)
+IN_CHANNELS=32      # 8 target subbands + 8×3 condition subbands
 NOISE_SCHED='linear'
 
-# ---- data paths ----
-DATA_DIR="D:\user\BraTS2024-GLI"
+# ---- data path (forward slashes — works on Windows Git Bash / WSL) ----
+DATA_DIR="C:/data/BraTS2024-GLI"
+
+# ---- per-modality model weights (for sample_auto.py) ----
+MODEL_T1N=""        # e.g. "C:/weights/brats_t1n.pt"
+MODEL_T1C=""
+MODEL_T2W=""
+MODEL_T2F=""
+
+# ---- output dir ----
+OUTPUT_DIR="./results/${DATASET}_${ITERATIONS}000"
+
 if [[ $MODE == 'train' ]]; then
   SPLIT='train'
-elif [[ $MODE == 'sample' || $MODE == 'auto' ]]; then
+elif [[ $MODE == 'sample' || $MODE == 'auto' || $MODE == 'eval' ]]; then
   BATCH_SIZE=1
   SPLIT='validation'
 fi
@@ -72,6 +90,7 @@ TRAIN="
 --num_workers=0
 --devices=${GPU}
 --seed=${SEED}
+--dropout_modality=False
 "
 
 if [[ $MODE == 'train' ]]; then
@@ -85,8 +104,7 @@ elif [[ $MODE == 'sample' ]]; then
     --use_fp16=False \
     --model_path=${RUN_DIR}/checkpoints/${DATASET}_${ITERATIONS}000.pt \
     --devices=${GPU} \
-    --output_dir=./results/${DATASET}_${ITERATIONS}000/ \
-    --num_samples=1000 \
+    --output_dir=${OUTPUT_DIR} \
     --use_ddim=False \
     --sampling_steps=${SAMPLING_STEPS} \
     --clip_denoised=True
@@ -97,11 +115,21 @@ elif [[ $MODE == 'auto' ]]; then
     --seed=${SEED} \
     --image_size=${IMAGE_SIZE} \
     --use_fp16=False \
-    --model_path=${RUN_DIR}/checkpoints/${DATASET}_${ITERATIONS}000.pt \
+    --model_t1n=${MODEL_T1N} \
+    --model_t1c=${MODEL_T1C} \
+    --model_t2w=${MODEL_T2W} \
+    --model_t2f=${MODEL_T2F} \
     --devices=${GPU} \
-    --output_dir=./results/${DATASET}_${ITERATIONS}000/ \
-    --num_samples=1000 \
+    --output_dir=${OUTPUT_DIR} \
     --use_ddim=False \
     --sampling_steps=${SAMPLING_STEPS} \
-    --clip_denoised=True
+    --clip_denoised=True \
+    --dropout_modality=True
+
+elif [[ $MODE == 'eval' ]]; then
+  python scripts/evaluate.py \
+    --output_dir=${OUTPUT_DIR} \
+    --contr=${CONTR} \
+    --save_csv=${OUTPUT_DIR}/metrics_${CONTR}.csv
 fi
+

@@ -1,5 +1,6 @@
 """
 A script for training a diffusion model for paired image-to-image translation.
+Uses BraTS20Dataset (our custom loader) instead of the original BRATSVolumes.
 """
 
 import argparse
@@ -16,8 +17,8 @@ from guided_diffusion.resample import create_named_schedule_sampler
 from guided_diffusion.script_util import (model_and_diffusion_defaults, create_model_and_diffusion,
                                           args_to_dict, add_dict_to_argparser)
 from guided_diffusion.train_util import TrainLoop
-from guided_diffusion.bratsloader import BRATSVolumes
 from torch.utils.tensorboard import SummaryWriter
+from brats_dataset import get_dataloader
 
 
 def main():
@@ -46,18 +47,16 @@ def main():
     logger.log("Creating model and diffusion...")
     arguments = args_to_dict(args, model_and_diffusion_defaults().keys())
     model, diffusion = create_model_and_diffusion(**arguments)
+    model.to(dist_util.dev([0, 1]) if len(args.devices) > 1 else dist_util.dev())
+    schedule_sampler = create_named_schedule_sampler(args.schedule_sampler, diffusion, maxt=1000)
 
-    # logger.log("Number of trainable parameters: {}".format(np.array([np.array(p.shape).prod() for p in model.parameters()]).sum()))
-    model.to(dist_util.dev([0, 1]) if len(args.devices) > 1 else dist_util.dev())  # allow for 2 devices
-    schedule_sampler = create_named_schedule_sampler(args.schedule_sampler, diffusion,  maxt=1000)
-
-    if args.dataset == 'brats':
-        ds = BRATSVolumes(args.data_dir, mode='train')
-
-    datal = th.utils.data.DataLoader(ds,
-                                     batch_size=args.batch_size,
-                                     num_workers=args.num_workers,
-                                     shuffle=True,)
+    datal = get_dataloader(
+        data_root=args.data_dir,
+        split="train",
+        batch_size=args.batch_size,
+        num_workers=0,   # keep 0 on Windows to avoid DataLoader multiprocessing issues
+        dropout_modality=args.dropout_modality,
+    )
 
     logger.log("Start training...")
     TrainLoop(
@@ -105,14 +104,15 @@ def create_argparser():
         fp16_scale_growth=1e-3,
         dataset='brats',
         use_tensorboard=True,
-        tensorboard_path='',  # set path to existing logdir for resuming
+        tensorboard_path='',
         devices=[0],
         dims=3,
         learn_sigma=False,
         num_groups=32,
         channel_mult="1,2,2,4,4",
-        in_channels=8,
+        in_channels=32,
         out_channels=8,
+        image_size=224,
         bottleneck_attention=False,
         num_workers=0,
         mode='default',
@@ -120,6 +120,7 @@ def create_argparser():
         additive_skips=False,
         use_freq=False,
         contr='t1n',
+        dropout_modality=False,
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()
@@ -129,3 +130,4 @@ def create_argparser():
 
 if __name__ == "__main__":
     main()
+
