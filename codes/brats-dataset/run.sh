@@ -33,7 +33,7 @@ IN_CHANNELS=32      # 8 target subbands + 8×3 condition subbands
 NOISE_SCHED='linear'
 
 # ---- data path (forward slashes — works on Windows Git Bash / WSL) ----
-DATA_DIR="C:/data/BraTS2024-GLI"
+DATA_DIR="D:/user/BraTS2024-GLI"
 
 # ---- per-modality model weights (for sample_auto.py) ----
 MODEL_T1N=""        # e.g. "C:/weights/brats_t1n.pt"
@@ -86,7 +86,7 @@ TRAIN="
 --image_size=${IMAGE_SIZE}
 --use_fp16=False
 --lr=1e-5
---save_interval=100000
+--save_interval=300
 --num_workers=0
 --devices=${GPU}
 --seed=${SEED}

@@ -117,18 +117,21 @@ def main():
         summary_writer=summary_writer,
         mode="i2i",          # image-to-image translation mode
         contr=args.contr,    # which modality to synthesise
+        tumor_loss_weight=args.tumor_loss_weight,
     ).run_loop()
 
 
 def create_argparser():
-    defaults = dict(
+    defaults = model_and_diffusion_defaults()
+    defaults.update(dict(
         # ---- our additions ----
         seed=42,
         use_tensorboard=True,
         tensorboard_path="",
         dropout_modality=False,   # set True to enable on-the-fly modality dropout
+        tumor_loss_weight=10.0,   # weight for tumor voxels in loss; 1.0 = disabled
         # ---- mirrors cwdm run.sh defaults ----
-        data_dir="",
+        data_dir="D:/user/BraTS2024-GLI",
         schedule_sampler="uniform",
         lr=1e-5,
         weight_decay=0.0,
@@ -137,7 +140,7 @@ def create_argparser():
         microbatch=-1,
         ema_rate="0.9999",
         log_interval=100,
-        save_interval=100000,
+        save_interval=300,
         resume_checkpoint="",
         resume_step=0,
         use_fp16=False,
@@ -164,8 +167,7 @@ def create_argparser():
         predict_xstart=True,
         noise_schedule="linear",
         diffusion_steps=1000,
-    )
-    defaults.update(model_and_diffusion_defaults())
+    ))
     defaults["split"] = "train"  # train | validation | additional
     parser = argparse.ArgumentParser()
     add_dict_to_argparser(parser, defaults)

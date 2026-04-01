@@ -1065,7 +1065,7 @@ class GaussianDiffusion:
         return {"output": output, "pred_xstart": out["pred_xstart"]}
 
     def training_losses(self, model,  x_start, t, classifier=None, model_kwargs=None, noise=None, labels=None,
-                        mode='default', contr='t1n'):
+                        mode='default', contr='t1n', tumor_weight=None):
         """
         Compute training losses for a single timestep.
         :param model: the model to evaluate loss on.
@@ -1144,7 +1144,11 @@ class GaussianDiffusion:
                                  model_output[:, 6, :, :, :].view(B, 1, H, W, D),
                                  model_output[:, 7, :, :, :].view(B, 1, H, W, D))
 
-        terms = {"mse_wav": th.mean(mean_flat((x_start_dwt - model_output) ** 2), dim=0)}
+        sq_err = (x_start_dwt - model_output) ** 2
+        if tumor_weight is not None:
+            # tumor_weight: (B, 1, H, W, D) in wavelet space — broadcast over C
+            sq_err = sq_err * tumor_weight
+        terms = {"mse_wav": th.mean(mean_flat(sq_err), dim=0)}
 
         return terms, model_output, model_output_idwt
 

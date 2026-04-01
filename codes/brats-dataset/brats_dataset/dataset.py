@@ -123,22 +123,26 @@ class BraTS20Dataset(Dataset):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _pad_and_crop(vol_np: np.ndarray) -> torch.Tensor:
+    def _pad_and_crop(vol_np: np.ndarray, is_seg: bool = False) -> torch.Tensor:
         """
-        vol_np : (1, H, W, D)  raw loaded volume, D may be 155
+        vol_np : (1, H, W, D) or (H, W, D) raw loaded volume.
 
-        Returns torch.FloatTensor (1, 224, 224, 160)
-        matching cwdm's:
-            t1n = torch.zeros(1, 240, 240, 160)
-            t1n[:, :, :, :155] = tensor(vol)
-            t1n = t1n[:, 8:-8, 8:-8, :]
+        Returns torch.Tensor (1, 224, 224, 160) for modalities
+        or (224, 224, 160) for segmentation.
         """
-        _, H, W, D = vol_np.shape
-        pad = torch.zeros(1, PAD_H, PAD_W, PAD_D, dtype=torch.float32)
-        t   = torch.from_numpy(vol_np).float()
-        pad[:, :H, :W, :min(D, PAD_D)] = t[:, :PAD_H, :PAD_W, :PAD_D]
-        # centre-crop H and W
-        return pad[:, CROP_H_START:CROP_H_END, CROP_W_START:CROP_W_END, :]
+        if is_seg:
+            H, W, D = vol_np.shape
+            pad = torch.zeros(PAD_H, PAD_W, PAD_D, dtype=torch.long)
+            t = torch.from_numpy(vol_np).long()
+            pad[:H, :W, :min(D, PAD_D)] = t[:PAD_H, :PAD_W, :PAD_D]
+            return pad[CROP_H_START:CROP_H_END, CROP_W_START:CROP_W_END, :]
+        else:
+            _, H, W, D = vol_np.shape
+            pad = torch.zeros(1, PAD_H, PAD_W, PAD_D, dtype=torch.float32)
+            t   = torch.from_numpy(vol_np).float()
+            pad[:, :H, :W, :min(D, PAD_D)] = t[:, :PAD_H, :PAD_W, :PAD_D]
+            # centre-crop H and W
+            return pad[:, CROP_H_START:CROP_H_END, CROP_W_START:CROP_W_END, :]
 
     # ------------------------------------------------------------------
     # Dataset protocol
@@ -180,6 +184,6 @@ class BraTS20Dataset(Dataset):
             sample['missing'] = drop
 
         if seg is not None:
-            sample['seg'] = torch.from_numpy(seg).long()
+            sample['seg'] = self._pad_and_crop(seg, is_seg=True)
 
         return sample
