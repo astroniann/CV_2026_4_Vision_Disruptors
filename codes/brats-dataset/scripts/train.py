@@ -82,6 +82,7 @@ def main():
         summary_writer=summary_writer,
         mode='i2i',
         contr=args.contr,
+        tumor_loss_weight=args.tumor_loss_weight,
     ).run_loop()
 
 
@@ -121,6 +122,7 @@ def create_argparser():
         use_freq=False,
         contr='t1n',
         dropout_modality=False,
+        tumor_loss_weight=10.0,   # weight for tumor voxels in loss; 1.0 = disabled
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

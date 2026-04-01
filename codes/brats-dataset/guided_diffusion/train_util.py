@@ -51,9 +51,11 @@ class TrainLoop:
         summary_writer=None,
         mode='default',
         loss_level='image',
+        tumor_loss_weight=1.0,
     ):
         self.summary_writer = summary_writer
         self.mode = mode
+        self.tumor_loss_weight = tumor_loss_weight
         self.model = model
         self.diffusion = diffusion
         self.datal = data
@@ -170,11 +172,20 @@ class TrainLoop:
 
                 names = ["LLL", "LLH", "LHL", "LHH", "HLL", "HLH", "HHL", "HHH"]
 
+<<<<<<< HEAD
                 if self.summary_writer is not None:
                     self.summary_writer.add_scalar('time/load', t_load, global_step=self.step + self.resume_step)
                     self.summary_writer.add_scalar('time/forward', t_fwd, global_step=self.step + self.resume_step)
                     self.summary_writer.add_scalar('time/total', t_total, global_step=self.step + self.resume_step)
                     self.summary_writer.add_scalar('loss/MSE', lossmse.item(), global_step=self.step + self.resume_step)
+=======
+            if self.summary_writer is not None:
+                self.summary_writer.add_scalar('time/load', t_load, global_step=self.step + self.resume_step)
+                self.summary_writer.add_scalar('time/forward', t_fwd, global_step=self.step + self.resume_step)
+                self.summary_writer.add_scalar('time/total', t_total, global_step=self.step + self.resume_step)
+                self.summary_writer.add_scalar('loss/MSE', lossmse.item(), global_step=self.step + self.resume_step)
+                self.summary_writer.add_scalar('loss/tumor_loss_weight', self.tumor_loss_weight, global_step=self.step + self.resume_step)
+>>>>>>> 9282ceb68f39492b3004523a6eb1ab16a09ed3a7
 
                 if self.step % 200 == 0:
                     image_size = sample_idwt.size()[2]
@@ -222,6 +233,35 @@ class TrainLoop:
             # Save the last checkpoint if it wasn't already saved.
             if (self.step - 1) % self.save_interval != 0:
                 self.save()
+
+    def _build_tumor_weight(self, batch):
+        """
+        Build a spatial tumor weight map in wavelet space from the segmentation mask.
+
+        Returns a (B, 1, H/2, W/2, D/2) float tensor where:
+          - background voxels (seg == 0) have weight 1.0
+          - tumor voxels      (seg  > 0) have weight self.tumor_loss_weight
+
+        Returns None if:
+          - tumor_loss_weight == 1.0  (weighting disabled), or
+          - 'seg' is not present in the batch (e.g. split='additional')
+        """
+        if self.tumor_loss_weight == 1.0 or 'seg' not in batch:
+            return None
+
+        seg = batch['seg']                                   # (B, H, W, D)  LongTensor
+        # Binarize: any non-background label is tumour
+        tumor_mask = (seg > 0).float().unsqueeze(1)          # (B, 1, H, W, D)
+        tumor_mask = tumor_mask.to(dist_util.dev())
+
+        # Downsample to wavelet space using the DWT LL approximation subband.
+        # No gradients needed — this is purely a weight map.
+        with th.no_grad():
+            LLL, *_ = self.dwt(tumor_mask)                   # LLL: (B, 1, H/2, W/2, D/2)
+            # Re-binarize after downsampling: any non-zero LL energy = tumour present
+            alpha = 1.0 + (self.tumor_loss_weight - 1.0) * (LLL > 0).float()
+
+        return alpha                                         # (B, 1, H/2, W/2, D/2)
 
     def run_step(self, batch, cond, label=None, info=dict()):
         lossmse, sample, sample_idwt = self.forward_backward(batch, cond, label)
@@ -271,7 +311,8 @@ class TrainLoop:
                                            model_kwargs=cond,
                                            labels=label,
                                            mode=self.mode,
-                                           contr=self.contr
+                                           contr=self.contr,
+                                           tumor_weight=self._build_tumor_weight(batch),
                                            )
         losses1 = compute_losses()
 

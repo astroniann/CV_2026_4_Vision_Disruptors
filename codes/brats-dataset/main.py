@@ -117,6 +117,7 @@ def main():
         summary_writer=summary_writer,
         mode="i2i",          # image-to-image translation mode
         contr=args.contr,    # which modality to synthesise
+        tumor_loss_weight=args.tumor_loss_weight,
     ).run_loop()
 
 
@@ -128,6 +129,7 @@ def create_argparser():
         use_tensorboard=True,
         tensorboard_path="",
         dropout_modality=False,   # set True to enable on-the-fly modality dropout
+        tumor_loss_weight=10.0,   # weight for tumor voxels in loss; 1.0 = disabled
         # ---- mirrors cwdm run.sh defaults ----
         data_dir="D:/user/BraTS2024-GLI",
         schedule_sampler="uniform",
