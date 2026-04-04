@@ -66,13 +66,14 @@ class Upsample(nn.Module):
         if isinstance(x, tuple):
             skip = x[1]
             x = x[0]
+        else:
+            skip = None
         assert x.shape[1] == self.channels
 
-        if self.use_conv:
-            skip = self.conv(th.cat(skip, dim=1) / 3.) * 3.
-            skip = tuple(th.chunk(skip, 7, dim=1))
-
-        if self.use_freq:
+        if self.use_freq and skip is not None:
+            if self.use_conv:
+                skip = self.conv(th.cat(skip, dim=1) / 3.) * 3.
+                skip = tuple(th.chunk(skip, 7, dim=1))
             x = self.idwt(3. * x, skip[0], skip[1], skip[2], skip[3], skip[4], skip[5], skip[6])
         else:
             if self.dims == 3 and self.resample_2d:
@@ -308,7 +309,17 @@ class AttentionBlock(nn.Module):
         self.proj_out = zero_module(conv_nd(1, channels, channels, 1))
 
     def forward(self, x):
-        return checkpoint(self._forward, (x,), self.parameters(), True)
+        received_tuple = False
+        skip = None
+        if isinstance(x, tuple):
+            received_tuple = True
+            x, skip = x
+            
+        out = checkpoint(self._forward, (x,), self.parameters(), True)
+        
+        if received_tuple:
+            return out, skip
+        return out
 
     def _forward(self, x):
         b, c, *spatial = x.shape
@@ -452,14 +463,19 @@ class CrossModalAttentionBlock(nn.Module):
 
     def forward(self, x, emb=None):
         # emb is ignored — required by TimestepEmbedSequential interface
-        return checkpoint(self._forward, (x,), self.parameters(), self.use_checkpoint)
-
-    def _forward(self, x):
-        # Handle tuple input from wavelet skip connection path
+        received_tuple = False
         skip = None
         if isinstance(x, tuple):
+            received_tuple = True
             x, skip = x
+            
+        out = checkpoint(self._forward, (x,), self.parameters(), self.use_checkpoint)
+        
+        if received_tuple:
+            return out, skip
+        return out
 
+    def _forward(self, x):
         b, c, *spatial = x.shape
         assert c == self.channels, (
             f"CrossModalAttentionBlock: expected {self.channels} channels, got {c}"
@@ -495,11 +511,7 @@ class CrossModalAttentionBlock(nn.Module):
 
         # Reconstruct full feature map
         out = th.cat([x_target, x_cond], dim=1)           # [B, C, N]
-        out = out.reshape(b, c, *spatial)
-
-        if skip is not None:
-            return out, skip
-        return out
+        return out.reshape(b, c, *spatial)
 
 
 class WavUNetModel(nn.Module):
@@ -837,6 +849,7 @@ class WavUNetModel(nn.Module):
             if self.devices is None:  # if self.devices has not been set yet, read it from params
                 p = next(self.parameters())
                 self.devices = [p.device, p.device]
+        return self
 
     def forward(self, x, timesteps):
         """
@@ -867,14 +880,15 @@ class WavUNetModel(nn.Module):
                 h = input_pyramid
 
         for module in self.middle_block:
-            h = module(h, emb)
+            if isinstance(module, TimestepBlock):
+                h = module(h, emb)
+            else:
+                h = module(h)
             if isinstance(h, tuple):
                 h, skip = h
 
         for module in self.output_blocks:
             new_hs = hs.pop()
-            if new_hs is not None:
-                skip = new_hs
 
             # Use additive skip connections
             if self.additive_skips:
@@ -882,13 +896,13 @@ class WavUNetModel(nn.Module):
                     h = (h + new_hs) / np.sqrt(2)
 
             # Use frequency aware skip connections
-            elif self.use_freq:  # You usually want to use the frequency aware upsampling
-                if isinstance(h, tuple):  # Replace None with the stored skip features
+            elif self.use_freq:
+                if isinstance(h, tuple):
                     l = list(h)
-                    l[1] = skip
+                    l[1] = new_hs
                     h = tuple(l)
                 else:
-                    h = (h, skip)
+                    h = (h, new_hs)
 
             # Use concatenation — only concat if skip is not None
             else:

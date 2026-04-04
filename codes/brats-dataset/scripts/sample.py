@@ -110,7 +110,7 @@ def main():
         LLL, LLH, LHL, LHH, HLL, HLH, HHL, HHH = dwt(cond_3)
         cond = th.cat([cond, LLL / 3., LLH, LHL, LHH, HLL, HLH, HHL, HHH], dim=1)
 
-        noise = th.randn(args.batch_size, 8, 112, 112, 80).to(dist_util.dev())
+        noise = th.randn(args.batch_size, 8, 96, 96, 96).to(dist_util.dev())
 
         sample = diffusion.p_sample_loop(
             model=model,
@@ -174,7 +174,7 @@ def create_argparser():
         output_dir='./results',
         mode='default',
         renormalize=False,
-        image_size=224,
+        image_size=96,
         half_res_crop=False,
         concat_coords=False,
         contr="t1n",

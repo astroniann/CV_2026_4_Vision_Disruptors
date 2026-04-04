@@ -32,7 +32,7 @@ from .patient import load_patient
 # Center crop to remove background (240 -> 192)
 CROP_H, CROP_W = 192, 192
 # Target spatial resolution
-OUT_SIZE = (96, 96, 96)
+OUT_SIZE = (192, 192, 192)
 
 # All four modality keys in a fixed order so random choice is reproducible
 _MODALITIES = ['t1n', 't1c', 't2w', 't2f']

@@ -269,6 +269,7 @@ def create_model(
             num_groups=num_groups,
             bottleneck_attention=bottleneck_attention,
             additive_skips=additive_skips,
+            resample_2d=resample_2d,
             use_freq=use_freq,
             use_cross_attn=use_cross_attn,
         )
