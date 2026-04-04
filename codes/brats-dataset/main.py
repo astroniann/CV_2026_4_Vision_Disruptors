@@ -175,7 +175,7 @@ def create_argparser():
         num_workers=4,
         contr="t2f",        # contrast to synthesise: t1n | t1c | t2w | t2f
         # ---- model/diffusion overrides matching run.sh ----
-        num_channels=32,
+        num_channels=64,
         channel_mult="1,2,4,4",
         in_channels=32,     # 8 target subbands + 8×3 condition subbands
         out_channels=8,
