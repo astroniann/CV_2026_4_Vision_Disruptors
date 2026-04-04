@@ -28,7 +28,7 @@ RUN_DIR=""          # path to run folder containing checkpoints/ subfolder
 CHANNEL_MULT=1,2,2,4,4
 ADDITIVE_SKIP=False
 BATCH_SIZE=1
-IMAGE_SIZE=224
+IMAGE_SIZE=96
 IN_CHANNELS=32      # 8 target subbands + 8×3 condition subbands
 NOISE_SCHED='linear'
 

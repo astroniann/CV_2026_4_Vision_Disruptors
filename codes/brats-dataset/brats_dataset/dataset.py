@@ -23,17 +23,16 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 from .patient import load_patient
 
 
-# Canonical BraTS depth: 155 slices padded to 160, then no depth crop
-PAD_H, PAD_W, PAD_D = 240, 240, 160
-CROP_H_START, CROP_H_END = 8, -8   # 240 -> 224
-CROP_W_START, CROP_W_END = 8, -8   # 240 -> 224
-# depth stays at 160 (cwdm does NOT crop depth)
-OUT_H, OUT_W, OUT_D = 224, 224, 160
+# Center crop to remove background (240 -> 192)
+CROP_H, CROP_W = 192, 192
+# Target spatial resolution
+OUT_SIZE = (96, 96, 96)
 
 # All four modality keys in a fixed order so random choice is reproducible
 _MODALITIES = ['t1n', 't1c', 't2w', 't2f']
@@ -127,22 +126,33 @@ class BraTS20Dataset(Dataset):
         """
         vol_np : (1, H, W, D) or (H, W, D) raw loaded volume.
 
-        Returns torch.Tensor (1, 224, 224, 160) for modalities
-        or (224, 224, 160) for segmentation.
+        Returns torch.Tensor (1, 96, 96, 96) for modalities
+        or (96, 96, 96) for segmentation.
         """
         if is_seg:
             H, W, D = vol_np.shape
-            pad = torch.zeros(PAD_H, PAD_W, PAD_D, dtype=torch.long)
-            t = torch.from_numpy(vol_np).long()
-            pad[:H, :W, :min(D, PAD_D)] = t[:PAD_H, :PAD_W, :PAD_D]
-            return pad[CROP_H_START:CROP_H_END, CROP_W_START:CROP_W_END, :]
+            h_start = max(0, (H - CROP_H) // 2)
+            w_start = max(0, (W - CROP_W) // 2)
+            
+            t = torch.from_numpy(vol_np).float()
+            cropped = t[h_start:h_start+CROP_H, w_start:w_start+CROP_W, :]
+            
+            # Interpolate expects (1, 1, H, W, D) for 3D interpolation
+            cropped = cropped.unsqueeze(0).unsqueeze(0)
+            resized = F.interpolate(cropped, size=OUT_SIZE, mode='nearest')
+            return resized.squeeze(0).squeeze(0).long()
         else:
             _, H, W, D = vol_np.shape
-            pad = torch.zeros(1, PAD_H, PAD_W, PAD_D, dtype=torch.float32)
-            t   = torch.from_numpy(vol_np).float()
-            pad[:, :H, :W, :min(D, PAD_D)] = t[:, :PAD_H, :PAD_W, :PAD_D]
-            # centre-crop H and W
-            return pad[:, CROP_H_START:CROP_H_END, CROP_W_START:CROP_W_END, :]
+            h_start = max(0, (H - CROP_H) // 2)
+            w_start = max(0, (W - CROP_W) // 2)
+            
+            t = torch.from_numpy(vol_np).float()
+            cropped = t[:, h_start:h_start+CROP_H, w_start:w_start+CROP_W, :]
+            
+            # Interpolate expects (1, 1, H, W, D) 
+            cropped = cropped.unsqueeze(0)
+            resized = F.interpolate(cropped, size=OUT_SIZE, mode='trilinear', align_corners=False)
+            return resized.squeeze(0)
 
     # ------------------------------------------------------------------
     # Dataset protocol

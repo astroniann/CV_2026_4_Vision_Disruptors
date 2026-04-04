@@ -407,6 +407,101 @@ class QKVAttention(nn.Module):
         return count_flops_attn(model, _x, y)
 
 
+class CrossModalAttentionBlock(nn.Module):
+    """
+    Cross-modal attention block for decoder feature maps.
+
+    Splits the feature map into target channels (Q) and condition channels (K, V).
+    The target queries the condition, enabling explicit cross-modal feature alignment.
+
+    Args:
+        channels:        total number of input channels (target + condition combined)
+        num_heads:       number of attention heads
+        num_groups:      number of groups for GroupNorm
+        use_checkpoint:  use gradient checkpointing
+    """
+
+    def __init__(self, channels, num_heads=1, num_groups=32, use_checkpoint=False):
+        super().__init__()
+        self.channels = channels
+        self.num_heads = num_heads
+        self.use_checkpoint = use_checkpoint
+
+        # Split: target = channels // 4, cond = remaining 3*channels // 4
+        self.target_ch = channels // 4
+        self.cond_ch = channels - self.target_ch
+
+        # GroupNorm requires num_channels % num_groups == 0; cap accordingly
+        target_groups = min(num_groups, self.target_ch)
+        while self.target_ch % target_groups != 0:
+            target_groups //= 2
+        cond_groups = min(num_groups, self.cond_ch)
+        while self.cond_ch % cond_groups != 0:
+            cond_groups //= 2
+
+        # Normalize each part separately
+        self.norm_target = normalization(self.target_ch, target_groups)
+        self.norm_cond   = normalization(self.cond_ch,   cond_groups)
+
+        # Project target -> Q
+        self.q_proj  = conv_nd(1, self.target_ch, self.target_ch, 1)
+        # Project condition -> K, V
+        self.kv_proj = conv_nd(1, self.cond_ch, self.target_ch * 2, 1)
+        # Project attention output back to target channels
+        self.proj_out = zero_module(conv_nd(1, self.target_ch, self.target_ch, 1))
+
+    def forward(self, x, emb=None):
+        # emb is ignored — required by TimestepEmbedSequential interface
+        return checkpoint(self._forward, (x,), self.parameters(), self.use_checkpoint)
+
+    def _forward(self, x):
+        # Handle tuple input from wavelet skip connection path
+        skip = None
+        if isinstance(x, tuple):
+            x, skip = x
+
+        b, c, *spatial = x.shape
+        assert c == self.channels, (
+            f"CrossModalAttentionBlock: expected {self.channels} channels, got {c}"
+        )
+
+        # Flatten spatial dims
+        x_flat = x.reshape(b, c, -1)                       # [B, C, N]
+        x_target = x_flat[:, :self.target_ch, :]           # [B, Ct, N]
+        x_cond   = x_flat[:, self.target_ch:, :]           # [B, Cc, N]
+
+        # Normalize and project
+        q  = self.q_proj(self.norm_target(x_target))       # [B, Ct, N]
+        kv = self.kv_proj(self.norm_cond(x_cond))          # [B, 2*Ct, N]
+        k, v = kv.chunk(2, dim=1)                          # each [B, Ct, N]
+
+        # Multi-head scaled dot-product attention
+        head_dim = self.target_ch // self.num_heads
+        scale = head_dim ** -0.5
+
+        q = q.reshape(b * self.num_heads, head_dim, -1)    # [B*H, d, N]
+        k = k.reshape(b * self.num_heads, head_dim, -1)
+        v = v.reshape(b * self.num_heads, head_dim, -1)
+
+        attn = th.einsum('bdn,bdm->bnm', q, k) * scale    # [B*H, N, N]
+        attn = th.softmax(attn, dim=-1)
+
+        h_attn = th.einsum('bnm,bdm->bdn', attn, v)       # [B*H, d, N]
+        h_attn = h_attn.reshape(b, self.target_ch, -1)    # [B, Ct, N]
+
+        # Project and add residual to target part only
+        h_attn = self.proj_out(h_attn)
+        x_target = x_target + h_attn
+
+        # Reconstruct full feature map
+        out = th.cat([x_target, x_cond], dim=1)           # [B, C, N]
+        out = out.reshape(b, c, *spatial)
+
+        if skip is not None:
+            return out, skip
+        return out
+
+
 class WavUNetModel(nn.Module):
     """
     The full UNet model with attention and timestep embedding.
@@ -437,7 +532,7 @@ class WavUNetModel(nn.Module):
                  use_checkpoint=False, use_fp16=False, num_heads=1, num_head_channels=-1, num_heads_upsample=-1,
                  use_scale_shift_norm=False, resblock_updown=False, use_new_attention_order=False, num_groups=32,
                  bottleneck_attention=True, resample_2d=True, additive_skips=False, decoder_device_thresh=0,
-                 use_freq=False, progressive_input='residual'):
+                 use_freq=False, progressive_input='residual', use_cross_attn=False):
         super().__init__()
 
         if num_heads_upsample == -1:
@@ -464,6 +559,7 @@ class WavUNetModel(nn.Module):
         self.additive_skips = additive_skips
         self.use_freq = use_freq
         self.progressive_input = progressive_input
+        self.use_cross_attn = use_cross_attn
 
         #############################
         # TIMESTEP EMBEDDING layers #
@@ -553,6 +649,7 @@ class WavUNetModel(nn.Module):
                         dims=dims,
                         out_channels=out_ch,
                         resample_2d=resample_2d,
+                        use_freq=self.use_freq,
                     )
                 )
             self.input_blocks.append(TimestepEmbedSequential(*layers))
@@ -643,6 +740,15 @@ class WavUNetModel(nn.Module):
                                 num_groups=self.num_groups,
                             )
                         )
+                        if self.use_cross_attn:
+                            layers.append(
+                                CrossModalAttentionBlock(
+                                    mid_ch,
+                                    num_heads=num_heads_upsample,
+                                    num_groups=self.num_groups,
+                                    use_checkpoint=use_checkpoint,
+                                )
+                            )
                     ch = mid_ch
                 else:                                                                       # Adding upsampling operation
                     out_ch = ch
@@ -666,7 +772,8 @@ class WavUNetModel(nn.Module):
                             conv_resample,
                             dims=dims,
                             out_channels=out_ch,
-                            resample_2d=resample_2d
+                            resample_2d=resample_2d,
+                            use_freq=self.use_freq,
                         )
                     )
                     ds //= 2
@@ -766,12 +873,13 @@ class WavUNetModel(nn.Module):
 
         for module in self.output_blocks:
             new_hs = hs.pop()
-            if new_hs:
+            if new_hs is not None:
                 skip = new_hs
 
             # Use additive skip connections
             if self.additive_skips:
-                h = (h + new_hs) / np.sqrt(2)
+                if new_hs is not None:
+                    h = (h + new_hs) / np.sqrt(2)
 
             # Use frequency aware skip connections
             elif self.use_freq:  # You usually want to use the frequency aware upsampling
@@ -782,9 +890,10 @@ class WavUNetModel(nn.Module):
                 else:
                     h = (h, skip)
 
-            # Use concatenation
+            # Use concatenation — only concat if skip is not None
             else:
-                h = th.cat([h, new_hs], dim=1)
+                if new_hs is not None:
+                    h = th.cat([h, new_hs], dim=1)
 
             h = module(h, emb)  # Run an upstream module
 

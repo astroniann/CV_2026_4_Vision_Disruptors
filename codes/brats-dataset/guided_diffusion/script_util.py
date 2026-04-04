@@ -78,6 +78,7 @@ def model_and_diffusion_defaults():
         mode='default',
         use_freq=False,
         predict_xstart=False,
+        use_cross_attn=False,
     )
     res.update(diffusion_defaults())
     return res
@@ -123,6 +124,7 @@ def create_model_and_diffusion(
     mode,
     use_freq,
     dataset,
+    use_cross_attn=False,
 ):
     model = create_model(
         image_size,
@@ -149,6 +151,7 @@ def create_model_and_diffusion(
         resample_2d=resample_2d,
         additive_skips=additive_skips,
         use_freq=use_freq,
+        use_cross_attn=use_cross_attn,
     )
     diffusion = create_gaussian_diffusion(
         steps=diffusion_steps,
@@ -189,6 +192,7 @@ def create_model(
     resample_2d=True,
     additive_skips=False,
     use_freq=False,
+    use_cross_attn=False,
 ):
     if not channel_mult:
         if image_size == 512:
@@ -266,6 +270,7 @@ def create_model(
             bottleneck_attention=bottleneck_attention,
             additive_skips=additive_skips,
             use_freq=use_freq,
+            use_cross_attn=use_cross_attn,
         )
 
 
