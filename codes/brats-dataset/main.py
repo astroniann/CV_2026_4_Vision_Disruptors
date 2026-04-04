@@ -168,14 +168,14 @@ def create_argparser():
         save_interval=1350,
         resume_checkpoint="",
         resume_step=0,
-        use_fp16=False,
+        use_fp16=True,
         fp16_scale_growth=1e-3,
         dataset="brats",
         devices=[0],
         num_workers=0,
         contr="t1n",        # contrast to synthesise: t1n | t1c | t2w | t2f
         # ---- model/diffusion overrides matching run.sh ----
-        num_channels=64,
+        num_channels=34,
         channel_mult="1,2,4,4",
         in_channels=32,     # 8 target subbands + 8×3 condition subbands
         out_channels=8,
@@ -192,7 +192,7 @@ def create_argparser():
         use_cross_attn=True,
         predict_xstart=True,
         noise_schedule="linear",
-        diffusion_steps=1000,
+        diffusion_steps=250,
     ))
     defaults["split"] = "train"  # train | validation | additional
     parser = argparse.ArgumentParser()
