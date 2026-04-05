@@ -79,6 +79,7 @@ def model_and_diffusion_defaults():
         use_freq=False,
         predict_xstart=False,
         use_cross_attn=False,
+        cond_channels=24,       # 3 condition modalities x 8 wavelet subbands
     )
     res.update(diffusion_defaults())
     return res
@@ -125,6 +126,7 @@ def create_model_and_diffusion(
     use_freq,
     dataset,
     use_cross_attn=False,
+    cond_channels=24,
 ):
     model = create_model(
         image_size,
@@ -152,6 +154,7 @@ def create_model_and_diffusion(
         additive_skips=additive_skips,
         use_freq=use_freq,
         use_cross_attn=use_cross_attn,
+        cond_channels=cond_channels,
     )
     diffusion = create_gaussian_diffusion(
         steps=diffusion_steps,
@@ -193,6 +196,7 @@ def create_model(
     additive_skips=False,
     use_freq=False,
     use_cross_attn=False,
+    cond_channels=24,
 ):
     if not channel_mult:
         if image_size == 512:
@@ -272,6 +276,7 @@ def create_model(
             resample_2d=resample_2d,
             use_freq=use_freq,
             use_cross_attn=use_cross_attn,
+            cond_channels=cond_channels,
         )
 
 

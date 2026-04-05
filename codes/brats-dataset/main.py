@@ -184,12 +184,13 @@ def create_argparser():
         num_res_blocks=2,
         num_heads=1,
         num_groups=32,
-        attention_resolutions="12,6",
+        attention_resolutions="8,4",   # ds values in decoder: 16,8,4,2 — 8 and 4 fire at mid-scales
         bottleneck_attention=True,
         resample_2d=False,
         additive_skips=False,
         use_freq=True,
         use_cross_attn=True,
+        cond_channels=24,       # 3 condition modalities x 8 wavelet subbands = the 3:1 ratio
         predict_xstart=True,
         noise_schedule="linear",
         diffusion_steps=250,

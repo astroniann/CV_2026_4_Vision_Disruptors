@@ -174,7 +174,7 @@ def create_argparser():
         output_dir='./results',
         mode='default',
         renormalize=False,
-        image_size=96,
+        image_size= 96,
         half_res_crop=False,
         concat_coords=False,
         contr="t1n",
